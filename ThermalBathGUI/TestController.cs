@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 
 
@@ -10,7 +11,13 @@ namespace ThermalBathGUI
 {
     internal class TestController
     {
+        private int projId;
         private String projName;
+        private String projStep;
+        private String user;
+        private String email;
+
+
         private double vcc;
         private List<Double> ie1List;
         private List<Double> ie2List;
@@ -18,24 +25,26 @@ namespace ThermalBathGUI
         private double tempLow;
         private double tempHigh;
         private double tempStep;
-        public TDAU tdau1;
-        public TDAU tdau2;
-        private bool[] tdau1Units;
-        private bool[] tdau2Units;
-        private String user;
+        public List<TDAU> tdauList;
+
 
         public TestController()
         {
             this.projName = String.Empty;
+            this.projStep = String.Empty;
             this.ie1List = new List<Double>();
             this.ie2List = new List<Double>();
             this.ie3List = new List<Double>();
-            this.tdau1 = new TDAU();
-            this.tdau2 = new TDAU();
-            this.tdau1Units = new bool[4];
-            this.tdau2Units = new bool[4];
+            this.tdauList = new List<TDAU>();
             this.user = String.Empty;
+
+            this.projId = -1;
+            this.projStep = String.Empty;
+            this.email = String.Empty;
+
         }
+
+    
 
         public String getProjName()
         {
@@ -52,10 +61,12 @@ namespace ThermalBathGUI
                 "\nIe3 corrents: " + String.Join(", ", ie3List) +
                 "\nLowest temperuture: " +tempLow+
                 "\nHighet tempruture: " +tempHigh+
-                "\nstep between each tempruture: " +tempStep+
-                "\nTDAU1: COM" + tdau1.getCom() + ", conection status: " + tdau1.getCnnectStatus()+
-                "\nTDAU2: COM" + tdau2.getCom() + ", conection status: " + tdau2.getCnnectStatus() +
+                "\nstep between each tempruture: " + tempStep+
                 "\nUser Email: " +user +"\n");
+            foreach (var tdau in tdauList)
+            {
+                Console.Write("TDAU" + tdau.getSerialNumber() + ": COM" + tdau.getCom() + " , conection status: " + tdau.getCnnectStatus() + "\n");
+            }
         }
 
 
@@ -78,18 +89,38 @@ namespace ThermalBathGUI
         public void setTempHigh(double number) { this.tempHigh = number; }
         public double getTempStep() { return tempStep; }
         public void setTempStep(double number) { this.tempStep = number; }
-        public int getCom1() { return tdau1.getCom(); }
-        public void setCom1(int com) {
-            tdau1.setCom(com);
+
+        public void addTdau(TDAU tdau)
+        {
+            tdauList.Add(tdau);
         }
-        public int getCom2() {return tdau2.getCom(); }
-        public void setCom2(int com) { this.tdau2.setCom((com)); }
-        public bool[] getTdau1Units() { return tdau1Units; }
-        public void setTdau1Units(bool[] tdau1Units) { this.tdau1Units = tdau1Units; }
-        public bool[] getTdau2Units() { return tdau2Units; }
-        public void setTdau2Units(bool[] tdau2Units) { this.tdau2Units = tdau2Units;  }
+
+        public TDAU getTdauByCom(int com)
+        {
+            foreach(TDAU tdau in tdauList)
+            {
+                if(tdau.getCom() == com)
+                {
+                    return tdau;
+                }
+            }
+            return null;
+        }
+
         public String getUser() { return user; }
         public void setUser(String user) { this.user = user;  }
+
+        public String getEmail() {  return email; }
+        public void setEmail(String email) {  this.email = email; }
+
+        public String getProjStep() { return projStep; }
+        public void setProjStep(String projStep) { this.projStep = projStep; }
+
+        public int getProjId() {  return projId; }
+        public void setProjId(int ProjId) { this.projId = ProjId; }
+
+
+
 
         public List<Double> getIeList(String ieType)
         {
@@ -111,6 +142,24 @@ namespace ThermalBathGUI
                 return new List<double>(); // Return an empty list if no match is found
             }
         }
+
+        public void disconnect()
+        {
+            foreach (var tdau in tdauList)
+            {
+                tdau.disconnect();
+            }
+            foreach (var tdau in tdauList)
+            {
+                tdau.disconnectPy();
+            }
+            foreach (var tdau in tdauList)
+            {
+                tdauList.Remove(tdau);
+            }
+
+        }
+
 
     }
 }

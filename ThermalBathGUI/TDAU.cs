@@ -19,10 +19,9 @@ internal class TDAU
         bool connectStatus = false;
         bool available = false;
         int com;
+        int serialNumber;
         dynamic TDAU_Module;
         dynamic TDAU_class;
-        dynamic python;
-        dynamic result;
 
 
         readonly int[,] CTRL_WORD = new int[,]
@@ -33,15 +32,14 @@ internal class TDAU
             };
 
         public TDAU() {
-            // Initialize the Python engine
-            PythonEngine.Initialize();
+                // Initialize the Python engine
+                PythonEngine.Initialize();
 
-            // Load the Python script
-            TDAU_Module = PythonEngine.ModuleFromString("TDAU", File.ReadAllText("C:\\Users\\lab_gigaev01\\source\\repos\\ThermalBathGUI\\TDAU_c.py"));
+                // Load the Python script
+                TDAU_Module = PythonEngine.ModuleFromString("TDAU", File.ReadAllText("C:\\Users\\lab_gigaev01\\source\\repos\\ThermalBathGUI\\TDAU_c.py"));
 
-            // Access the TDAU class from the Python module
-            TDAU_class = TDAU_Module.TDAU();
-
+                // Access the TDAU class from the Python module
+                TDAU_class = TDAU_Module.TDAU();
         }
         
         public bool getCnnectStatus() { return connectStatus; }
@@ -53,23 +51,15 @@ internal class TDAU
             this.available = true;
         }
 
+        public int getSerialNumber() { return serialNumber; }
 
 
         public void connect()
         {
-            // Call the fnConnect method with the appropriate argument
-            Console.WriteLine(TDAU_class.fnConnect(com));
-            //TDAU_class.fnSaveToFile();
-            Console.WriteLine(TDAU_class.fnRdMemory(0x54, 4));
+            Console.WriteLine(this.TDAU_class.fnConnect(com));
 
-            String input = TDAU_class.fnRdMemory(0x54, 4);
-            string result = new string(input.Replace(" ", "").Take(8).ToArray());
-            float num = HexToFloat(result);
-
-            Console.WriteLine(input + "\n" + result);
-            Console.WriteLine(num);
-            Console.WriteLine(FloatToHex(num));
-
+            String input = TDAU_class.fnRdMemory(0x180, 4);
+            this.serialNumber = this.readSerialNumber();
             connectStatus = true;
         }
 
@@ -150,10 +140,15 @@ internal class TDAU
             TDAU_class.fnSCOCalibration();
         }
 
+        public int readSerialNumber()
+        {
+            int val = TDAU_class.fnRdSerialNumber();
+            return val;
+        }
+
         public void disconnect()
         {
             Console.WriteLine(TDAU_class.fnDisconnect());
-            connectStatus = false;
         }
 
         public void disconnectPy()

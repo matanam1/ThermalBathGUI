@@ -27,6 +27,7 @@ namespace ThermalBathGUI
             // Load the Python script
             bath_Module = PythonEngine.ModuleFromString("BATH", File.ReadAllText("C:\\Users\\lab_gigaev01\\source\\repos\\ThermalBathGUI\\ThermalBath.py"));
 
+
             // Access the Python functions from the module
             setTempFunction = bath_Module.set_temp;
             getTemperatureFunction = bath_Module.get_temperture;
