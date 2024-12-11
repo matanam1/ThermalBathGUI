@@ -7,6 +7,11 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography.Xml;
 using static System.Net.Mime.MediaTypeNames;
+using Syncfusion.XlsIO;
+using ClosedXML.Excel;
+
+
+
 
 
 
@@ -27,7 +32,7 @@ namespace ThermalBathGUI
 
                 // Create the Measurement table
                 string createTableQuery = "CREATE TABLE IF NOT EXISTS Test (" +
-                    "Test_Id INTEGER, Proj_Id INTEGER,  Diode_Id INTEGER, Current_Com INTEGER, Temperature REAL, Voltage REAL, " +
+                    "Date_Time date, Test_Id INTEGER, Proj_Id INTEGER,  Diode_Id INTEGER, Current_Com INTEGER, Temperature REAL, Voltage REAL, " +
                     "Vbe1 REAL, Ib1 REAL, Vbe2 REAL, Ib2 REAL, Vbe3 REAL, Ib3 REAL, " +
                     "Ie1_measured REAL, Ie2_measured REAL, Ie3_measured REAL, " +
                     "Ic1 REAL, Ic2 REAL, Ic3 REAL, " +
@@ -54,7 +59,7 @@ namespace ThermalBathGUI
 
                 // Create the TDAU table
                 createTableQuery = "CREATE TABLE IF NOT EXISTS TDAU (" +
-                    "Diode_Id INTEGER, Proj_id INTEGER, com_port INTEGER, channel INTEGER, SN INTEGER," +
+                    "Diode_Id INTEGER, Proj_id INTEGER, Tdau_Dut INTEGER, com_port INTEGER, channel INTEGER, SN INTEGER," +
                     "PRIMARY KEY(Diode_Id, Proj_Id)," +
                     "FOREIGN KEY(Proj_Id) REFERENCES Project_Info);";
 
@@ -145,15 +150,11 @@ namespace ThermalBathGUI
             }
         }
 
-        public void InsertDataOfTDAUTable()
-        {
-
-        }
 
         public void InsertDataOfTestTable(TestController test)
         {
             int unitsNumber = numberOfUnits(test);
-            List<double> tempertureList = GenerateValuesInRange(test.getTempLow(), test.getTempHigh(), test.getTempStep());
+            List<double> tempertureList = GenerateValuesInRange(test.getTempLow(), test.getTempHigh(), test.getTempStep(),test.getTemperatureList());
             List<int> CurrentCombinationList = RetrieveColumnValues(test.getProjId(),"Current_combination", "Current_Com");
             int j = 0;
             // Get the diode IDs from the TDAU table
@@ -290,7 +291,7 @@ namespace ThermalBathGUI
                 connection.Open();
 
                 // Define SQLite INSERT query
-                string insertQuery = $"INSERT INTO TDAU (Diode_Id, Proj_Id, com_port, channel, SN) VALUES (@Diode_Id, @Proj_Id , @com, @ch, @sn)";
+                string insertQuery = $"INSERT INTO TDAU (Diode_Id, Proj_Id, com_port, channel, SN, Tdau_Dut) VALUES (@Diode_Id, @Proj_Id , @com, @ch, @sn, @dut)";
 
                 // Create a SQLite command
                 using (SQLiteCommand command = new SQLiteCommand(insertQuery, connection))
@@ -308,6 +309,7 @@ namespace ThermalBathGUI
                             command.Parameters.AddWithValue("@com", tdau.getCom());
                             command.Parameters.AddWithValue("@ch", i);
                             command.Parameters.AddWithValue("@sn", tdau.getSerialNumber());
+                            command.Parameters.AddWithValue("@dut", tdau.getDut());
                             // Execute the SQLite query to insert the combination into the table
                             command.ExecuteNonQuery();
                         }
@@ -455,24 +457,33 @@ namespace ThermalBathGUI
             return units;
         }
 
-        public List<double> GenerateValuesInRange(double low, double high, double step)
+        public List<double> GenerateValuesInRange(double low, double high, double step, List<Double> temperatureList)
         {
-            List<double> values = new List<double>();
-            if (low == high) {
-                values.Add(low);
-                values.Add(low);
-                return values;
-            }
-            for (double value = low; value <= high; value += step)
+            List<double> result = new List<double>();
+
+            // Method 1: If you want to combine both ranges and sort
+            // Add values from range
+            if (!(low == 0 && high == 0 && step == 0))
             {
-                values.Add(value);
+                if (step == 0)
+                    result.Add(high);
+                else { 
+                    for (double i = low; i <= high; i += step)
+                        result.Add(i);
+                }
             }
-            return values;
+            // Add values from temperatureList
+            result.AddRange(temperatureList);
+            // Sort the combined list
+            result.Sort();
+            //remove duplicates:
+            result = result.Distinct().OrderBy(x => x).ToList();
+            return result;
         }
 
 
 
-        public void createView(int Proj_Id, String name)
+        public String createView(int Proj_Id, String name)
         {
             String viewName = $"{name}_{DateTime.Now:yyyyMMdd_HHmm}";
             using (SQLiteConnection connection = new SQLiteConnection(connectionString))
@@ -480,18 +491,305 @@ namespace ThermalBathGUI
                 connection.Open();
 
                 string viewCreationQuery = $@"CREATE VIEW {viewName} AS
-                    SELECT Test_Id,Proj_id,SN,com_port as Unit,channel,Diode_Id,Current_Com,Temperature,Voltage,
+                    SELECT Test_Id,Proj_id,SN,Tdau_Dut,com_port as Com,channel,Diode_Id,Current_Com,Temperature,Voltage,
                     Ie1,Ie2,Ie3,Vbe1,Ib1,Vbe2,Ib2,Vbe3,Ib3,Ie1_measured,Ie2_measured,Ie3_measured,
                     Ic1,Ic2,Ic3,Ie1_leak,Ie2_leak,Ie3_leak,Ib1_leak,Ib2_leak,Ib3_leak,RS,Idea
                     FROM Test NATURAL JOIN Current_combination NATURAL JOIN TDAU WHERE Test.Proj_Id={Proj_Id};";
 
                 using (SQLiteCommand command = new SQLiteCommand(viewCreationQuery, connection))
                 {
-                    //command.Parameters.AddWithValue("@Proj_Id", Proj_Id);
                     command.ExecuteNonQuery();
                 }
                 connection.Close();
             }
+            return viewName;
         }
+
+        public String ExportViewToExcel(string viewName, string excelPath)
+        {
+            using var workbook = new XLWorkbook();
+            var dataSheet = ExportToWorksheet(workbook, viewName, viewName);
+            workbook.SaveAs(excelPath+viewName+".xlsx");
+            return (excelPath + viewName + ".xlsx");
+        }
+
+        private IXLWorksheet ExportToWorksheet(IXLWorkbook workbook, string viewName, string sheetName)
+        {
+            using var connection = new SQLiteConnection(connectionString);
+            connection.Open();
+
+            using var command = new SQLiteCommand($"SELECT * FROM {viewName}", connection);
+            using var reader = command.ExecuteReader();
+
+            var worksheet = workbook.Worksheets.Add(sheetName);
+
+            // Write headers
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                worksheet.Cell(1, i + 1).Value = reader.GetName(i);
+            }
+
+            // Write data
+            int row = 2;
+            while (reader.Read())
+            {
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    var value = reader.GetValue(i);
+                    if (value != DBNull.Value)
+                    {
+                        switch (reader.GetFieldType(i).Name.ToLower())
+                        {
+                            case "double":
+                                worksheet.Cell(row, i + 1).Value = reader.GetDouble(i);
+                                break;
+                            case "float":
+                                worksheet.Cell(row, i + 1).Value = reader.GetFloat(i);
+                                worksheet.Cell(row, i + 1).Style.NumberFormat.Format = "##0.0E+0";
+
+                                break;
+                            case "int32":
+                            case "int64":
+                                worksheet.Cell(row, i + 1).Value = reader.GetInt32(i);
+                                break;
+                            case "decimal":
+                                worksheet.Cell(row, i + 1).Value = reader.GetDecimal(i);
+                                worksheet.Cell(row, i + 1).Style.NumberFormat.Format = "##0.0E+0";
+
+                                break;
+                            default:
+                                worksheet.Cell(row, i + 1).Value = value.ToString();
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        worksheet.Cell(row, i + 1).Value = 0;
+                    }
+                }
+                row++;
+            }
+
+            worksheet.Columns().AdjustToContents();
+            return worksheet;
+        }
+
+
+        ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        ///
+
+
+public class CurrentData
+    {
+        public string Temperature { get; set; }
+        public int Channel { get; set; }
+        public double Ie1 { get; set; }
+        public double Ie2 { get; set; }
+        public double Ie3 { get; set; }
+        public double Vbe1 { get; set; }
+        public double Vbe2 { get; set; }
+        public double Vbe3 { get; set; }
     }
+
+    public class CurrentAnalysisResult
+    {
+        public string CurrentType { get; set; }
+        public double CurrentValue { get; set; }
+        public int Channel { get; set; }
+        public double Slope { get; set; }
+        public double Intercept { get; set; }
+        public double RSquared { get; set; }
+        public bool IsTemperatureXAxis { get; set; }
+    }
+
+    public Dictionary<string, List<double>> GetDistinctCurrents(String viewName)
+    {
+        var currents = new Dictionary<string, List<double>>();
+
+        using (var connection = new SQLiteConnection(connectionString))
+        {
+            connection.Open();
+            string sql = $@"
+        WITH TempAnalysis AS (
+            SELECT DISTINCT 'Ie1' as Current_Type, Ie1 as Current_Value
+            FROM {viewName}
+            UNION ALL
+            SELECT DISTINCT 'Ie2' as Current_Type, Ie2 as Current_Value
+            FROM {viewName}
+            UNION ALL
+            SELECT DISTINCT 'Ie3' as Current_Type, Ie3 as Current_Value
+            FROM {viewName}
+        )
+        SELECT Current_Type, Current_Value
+        FROM TempAnalysis
+        ORDER BY Current_Type, Current_Value;";
+
+            using (var command = new SQLiteCommand(sql, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string currentType = reader["Current_Type"].ToString();
+                        double currentValue = Convert.ToDouble(reader["Current_Value"]);
+
+                        if (!currents.ContainsKey(currentType))
+                        {
+                            currents[currentType] = new List<double>();
+                        }
+                        currents[currentType].Add(currentValue);
+                    }
+                }
+            }
+        }
+        return currents;
+    }
+
+    public List<int> GetDistinctChannels(String viewName)
+    {
+        var channels = new List<int>();
+
+        using (var connection = new SQLiteConnection(connectionString))
+        {
+            connection.Open();
+            string sql = $"SELECT DISTINCT Channel FROM {viewName} ORDER BY Channel;";
+
+            using (var command = new SQLiteCommand(sql, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        channels.Add(Convert.ToInt32(reader["Channel"]));
+                    }
+                }
+            }
+        }
+        return channels;
+    }
+
+    public List<CurrentData> GetMeasurementData(String viewName)
+    {
+        var measurements = new List<CurrentData>();
+
+        using (var connection = new SQLiteConnection(connectionString))
+        {
+            connection.Open();
+            string sql = $@"SELECT Temperature, channel, Ie1, Ie2, Ie3, Vbe1, Vbe2, Vbe3 
+                      FROM {viewName} ORDER BY Temperature, channel;";
+
+            using (var command = new SQLiteCommand(sql, connection))
+            {
+                using (var reader = command.ExecuteReader())
+                {
+                        while (reader.Read())
+                        {
+                            try{ 
+                            measurements.Add(new CurrentData
+                            {
+                                Temperature = reader["Temperature"].ToString(),
+                                Channel = Convert.ToInt32(reader["channel"]),
+                                Ie1 = Convert.ToDouble(reader["Ie1"]),
+                                Ie2 = Convert.ToDouble(reader["Ie2"]),
+                                Ie3 = Convert.ToDouble(reader["Ie3"]),
+                                Vbe1 = Convert.ToDouble(reader["Vbe1"]),
+                                Vbe2 = Convert.ToDouble(reader["Vbe2"]),
+                                Vbe3 = Convert.ToDouble(reader["Vbe3"])
+                            });
+                        }catch (Exception ex) { }
+                    }
+                }
+            }
+        }
+        return measurements;
+    }
+
+    public List<CurrentAnalysisResult> AnalyzeCurrents(String viewName, bool isTemperatureXAxis = true)
+    {
+        var results = new List<CurrentAnalysisResult>();
+        var measurements = GetMeasurementData(viewName);
+        var distinctCurrents = GetDistinctCurrents(viewName);
+        var channels = GetDistinctChannels(viewName);
+
+        foreach (var channel in channels)
+        {
+            foreach (var currentType in distinctCurrents.Keys)
+            {
+                foreach (var currentValue in distinctCurrents[currentType])
+                {
+                    // Filter measurements for this current and channel
+                    var filteredData = measurements.Where(m =>
+                    {
+                        double current = currentType == "Ie1" ? m.Ie1 :
+                                       currentType == "Ie2" ? m.Ie2 : m.Ie3;
+                        return Math.Abs(current - currentValue) < 1e-9 && m.Channel == channel;
+                    }).ToList();
+
+                    if (filteredData.Any())
+                    {
+                        // Get temperature and voltage data
+                        var temperatures = filteredData.Select(m => double.Parse(m.Temperature)).ToArray();
+                        var voltages = filteredData.Select(m =>
+                        {
+                            return currentType == "Ie1" ? m.Vbe1 :
+                                   currentType == "Ie2" ? m.Vbe2 : m.Vbe3;
+                        }).ToArray();
+
+                        // Choose X and Y based on isTemperatureXAxis
+                        var x = isTemperatureXAxis ? temperatures : voltages;
+                        var y = isTemperatureXAxis ? voltages : temperatures;
+
+                        // Calculate linear regression
+                        var regression = CalculateLinearRegression(x, y);
+
+                        results.Add(new CurrentAnalysisResult
+                        {
+                            CurrentType = currentType,
+                            CurrentValue = currentValue,
+                            Channel = channel,
+                            Slope = regression.Item1,
+                            Intercept = regression.Item2,
+                            RSquared = regression.Item3,
+                            IsTemperatureXAxis = isTemperatureXAxis
+                        });
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private Tuple<double, double, double> CalculateLinearRegression(double[] x, double[] y)
+    {
+        int n = x.Length;
+        double sumX = x.Sum();
+        double sumY = y.Sum();
+        double sumXY = x.Zip(y, (a, b) => a * b).Sum();
+        double sumX2 = x.Select(a => a * a).Sum();
+
+        double slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        double intercept = (sumY - slope * sumX) / n;
+
+        // Calculate R-squared
+        double yMean = y.Average();
+        double totalSumSquares = y.Select(a => (a - yMean) * (a - yMean)).Sum();
+        double residualSumSquares = y.Zip(x, (a, b) => (a - (slope * b + intercept)) * (a - (slope * b + intercept))).Sum();
+        double rSquared = 1 - (residualSumSquares / totalSumSquares);
+
+        return Tuple.Create(slope, intercept, rSquared);
+    }
+
+    public string GetEquation(CurrentAnalysisResult result)
+    {
+        string xVariable = result.IsTemperatureXAxis ? "T" : "Vbe";
+        string yVariable = result.IsTemperatureXAxis ? "Vbe" : "T";
+
+        return $"Channel {result.Channel}, {result.CurrentType} = {result.CurrentValue:E2} A:\n" +
+               $"{yVariable} = {result.Intercept:F6} + ({result.Slope:F6} * {xVariable})\n" +
+               $"R² = {result.RSquared:F4}";
+    }
+
+
+}
 }

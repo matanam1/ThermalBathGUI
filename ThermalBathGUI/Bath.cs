@@ -36,7 +36,7 @@ namespace ThermalBathGUI
                 if (!serialPort.IsOpen)
                 {
                     serialPort.Open();
-                    Console.WriteLine("Connection to bath opened.");
+                    //Console.WriteLine("Connection to bath opened.");
                 }
             }
             catch (Exception ex)

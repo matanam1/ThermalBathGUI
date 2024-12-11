@@ -9,8 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="pythonnet_netstandard_py37_win" Version="2.5.2" />
     <PackageReference Include="SQLite" Version="3.13.0" />
+    <PackageReference Include="Syncfusion.XlsIO.Net.Core" Version="27.2.2" />
     <PackageReference Include="System.Data.SQLite" Version="1.0.118" />
     <PackageReference Include="System.IO.Ports" Version="7.0.0" />
   </ItemGroup>

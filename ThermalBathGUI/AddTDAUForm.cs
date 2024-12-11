@@ -25,7 +25,7 @@ namespace ThermalBathGUI
             this.TDAUValue = TDAUValue;
 
             // Use TDAUValue (for example, set it in a label or textbox)
-            tdauNumber.Text = ""+TDAUValue;
+            //tdauNumber.Text = ""+TDAUValue;
 
             this.usedPorts = usedPorts;
         }
@@ -49,8 +49,8 @@ namespace ThermalBathGUI
 
         private void ConnectBtn_Click(object sender, EventArgs e)
         {
-            TDAUValue = int.Parse(tdauNumber.Text);
-            PortValue = int.Parse(portComboBox.Text);
+            //TDAUValue = int.Parse(tdauNumber.Text);
+            //PortValue = int.Parse(portComboBox.Text);
 
             // Close the form
             this.DialogResult = DialogResult.OK; // Sets the result to OK

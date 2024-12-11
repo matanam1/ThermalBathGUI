@@ -20,6 +20,9 @@ namespace ThermalBathGUI
         {
             InitializeComponent();
             this.BackColor = Color.White;
+
+            // Clear previous items if needed
+            listView1.Items.Clear();
         }
 
         private void Form1_Load(object sender, EventArgs e)
@@ -29,6 +32,7 @@ namespace ThermalBathGUI
 
 
         TestController test = new TestController();
+        Bath bath = null;
 
 
 
@@ -279,10 +283,12 @@ namespace ThermalBathGUI
 
         private void startTestBtn_Click(object sender, EventArgs e)
         {
+            String fileName,viewName;
+
             DBController db = new DBController();
-            test.setProjId(db.getNextProjId()-1);
-            /*test.printTest();
             db.CreateDatabase();
+            test.setProjId(db.getNextProjId());
+            test.printTest();
             db.InsertDataOfProjectInfoTable(test.getProjId(), test.getProjName(), test.getProjStep(), test.getUser(), test.getEmail());
             db.InsertDataOfCurrentCombinationTable(test.getProjId(), test.getIe1List(), test.getIe2List(), test.getIe3List());
             db.InsertDataOfTDAUTable(test);
@@ -291,8 +297,32 @@ namespace ThermalBathGUI
             runTest(test);
 
             db.updateIc(test.getProjId());
-            db.updateRs_Idea(test.getProjId());*/
-            db.createView(test.getProjId(),test.getProjName());
+            db.updateRs_Idea(test.getProjId());
+            //viewName = "LNL_20241105_1547";
+            viewName = db.createView(test.getProjId(), test.getProjName());
+            fileName = db.ExportViewToExcel(viewName, "C:\\Users\\lab_gigaev01\\Desktop\\ThermalBathResults\\");
+
+
+
+
+            // Analyze with Temperature as X-axis
+            Console.WriteLine("=== Analysis by Channel and Current ===");
+            var results = db.AnalyzeCurrents(viewName, isTemperatureXAxis: false);
+
+            // Group results by channel for better organization
+            var groupedResults = results.GroupBy(r => r.Channel);
+            foreach (var channelGroup in groupedResults)
+            {
+                Console.WriteLine($"\n=== Channel {channelGroup.Key} ===");
+                foreach (var result in channelGroup)
+                {
+                    Console.WriteLine(db.GetEquation(result));
+                    Console.WriteLine();
+                }
+            }
+
+
+
 
             test.disconnect();
             Console.WriteLine("test has been Done!!");
@@ -302,13 +332,10 @@ namespace ThermalBathGUI
 
         private void runTest(TestController test)
         {
-            Bath bath = new Bath("COM3", 2400);
-            bath.OpenConnection();
-            Console.WriteLine(bath.getTemp());
 
             foreach (var tdau in test.tdauList)
             {
-                tdau.writeCtrlWord(0);
+                    tdau.writeCtrlWord(0);
             }
 
 
@@ -318,7 +345,7 @@ namespace ThermalBathGUI
             {
                 connection.Open();
 
-                string query =   "SELECT Test_Id,Proj_id,Diode_Id,com_port,channel,Ie1,Ie2,Ie3 ,Temperature "
+                string query = "SELECT Test_Id,Proj_id,Diode_Id,com_port,channel,Ie1,Ie2,Ie3 ,Temperature "
                                + "FROM Test "
                                + "NATURAL JOIN Current_combination "
                                + "NATURAL JOIN TDAU "
@@ -336,16 +363,30 @@ namespace ThermalBathGUI
                             if (oldTemperture != Convert.ToInt32(reader["Temperature"]))
                             {
                                 oldTemperture = Convert.ToInt32(reader["Temperature"]);
-                                bath.setTemp(oldTemperture);
-                                Thread.Sleep(300*1000);
+                                try
+                                {
+                                    bath.setTemp(oldTemperture);
+                                    //Thread.Sleep(600 * 1000);//stable time for bath
+                                }
+                                catch (Exception e)
+                                {
+                                    Console.WriteLine("bathe bot connected or you need to change the com port in the code" + e);
+                                }
                             }
                             insertMesurment2DB(test.getTdauByCom(Convert.ToInt32(reader["com_port"])), Convert.ToInt32(reader["Test_Id"]), test.getProjId(), Convert.ToInt32(reader["channel"]), connection);
                         }
                     }
                 }
             }
-            bath.setDefualtTemp();
-            bath.CloseConnection();
+            try
+            {
+                bath.setDefualtTemp();
+                bath.CloseConnection();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("bathe bot connected or you need to change the com port in the code" + e);
+            }
         }
 
 
@@ -363,9 +404,9 @@ namespace ThermalBathGUI
             object com = reader["com_port"];
             object temp = reader["Temperature"];
 
-            if (Convert.ToInt32(channel)==4) { return true;} ///need to be delete with row 388 only for unit with 3 didoe
+            //if (Convert.ToInt32(channel) == 4) { return true; } ///need to be delete with row 388 only for unit with 3 didoe
 
-            TDAU tdau;
+            TDAU1Controller tdau;
             int unit_id = Convert.ToInt32(reader["Diode_Id"]);
 
             if (ie1 != DBNull.Value && ie2 != DBNull.Value && ie3 != DBNull.Value)
@@ -382,14 +423,10 @@ namespace ThermalBathGUI
             return true; // Indicates that there is another row to read
         }
 
-        private void insertMesurment2DB(TDAU tdau, int testId,int Proj_Id, int ch, SQLiteConnection connection)
+        private void insertMesurment2DB(TDAU1Controller tdau, int testId, int Proj_Id, int ch, SQLiteConnection connection)
         {
-            if (ch == 4) { return; }        ///need to be delete with row 367 only for unit with 3 didoe
-            //Console.WriteLine(testId);
-            // Create your SQLite connection
-            //using (SQLiteConnection connection = new SQLiteConnection(connectionString))
+            //if (ch == 4) { return; }        ///need to be delete with row 367 only for unit with 3 didoe
 
-            //connection.Open();
             tdau.calibrate();
 
 
@@ -398,50 +435,109 @@ namespace ThermalBathGUI
                     $" Vbe1=@val1, Ib1=@val2, Vbe2=@val3, Ib2=@val4, Vbe3=@val5, Ib3=@val6, " +
                     $" Ie1_measured=@val7, Ie2_measured=@val8, Ie3_measured=@val9, " +
                     $" Ie1_leak=@val10, Ie2_leak=@val11, Ie3_leak=@val12, " +
-                    $" Ib1_leak=@val13, Ib2_leak=@val14, Ib3_leak=@val15 " +
+                    $" Ib1_leak=@val13, Ib2_leak=@val14, Ib3_leak=@val15,  Date_Time=@DateTime" +
                     $" WHERE Test_Id=@val AND Test.Proj_Id = @Proj_Id;";
 
-                // Create a SQLite command
-                using (SQLiteCommand command = new SQLiteCommand(insertQuery, connection))
-                {
-                    // Set parameter values for the SQLite query
-                    command.Parameters.Clear();
-                    command.Parameters.AddWithValue("@val1", tdau.readMemorey(1090 + 26 * ch + 8 * 1));        //Vbe[n] = 1090+26*ch+8*I
-                    command.Parameters.AddWithValue("@val5", tdau.readMemorey(1090 + 26 * ch + 8 * 3));        //Vbe[n]= 1090+26*ch+8*I
-                    command.Parameters.AddWithValue("@val3", tdau.readMemorey(1090 + 26 * ch + 8 * 2));        //Vbe[n] = 1090+26*ch+8*I
-                    command.Parameters.AddWithValue("@val2", tdau.readMemorey(1094 + 26 * ch + 8 * 1));        //Ib[n] = 1094+26*G30+8*H30
-                    command.Parameters.AddWithValue("@val4", tdau.readMemorey(1094 + 26 * ch + 8 * 2));        //Ib[n] = 1094+26*ch+8*H30
-                    command.Parameters.AddWithValue("@val6", tdau.readMemorey(1094 + 26 * ch + 8 * 3));        //Ib[n] = 1094+26*G30+8*H30
-                    command.Parameters.AddWithValue("@val7", tdau.readMemorey(1036 + 12 * ch + 4 * 1));        //Ie[n]_meas=1036+12*ch+4*I
-                    command.Parameters.AddWithValue("@val8", tdau.readMemorey(1036 + 12 * ch + 4 * 2));        //Ie[n]_meas=1036+12*ch+4*I
-                    command.Parameters.AddWithValue("@val9", tdau.readMemorey(1036 + 12 * ch + 4 * 3));        //Ie[n]_meas=1036+12*ch+4*I
-                    command.Parameters.AddWithValue("@val10", tdau.readMemorey(944 + 12 * ch + 4 * 1));        //Ie[n]_leak=944+12*ch+4*I
-                    command.Parameters.AddWithValue("@val11", tdau.readMemorey(944 + 12 * ch + 4 * 2));        //Ie[n]_leak=944+12*ch+4*I
-                    command.Parameters.AddWithValue("@val12", tdau.readMemorey(944 + 12 * ch + 4 * 3));        //Ie[n]_leak=944+12*ch+4*I
-                    command.Parameters.AddWithValue("@val13", tdau.readMemorey(896 + 12 * ch + 4 * 1));        //Ib[n]_leak=896+12*ch+4*I
-                    command.Parameters.AddWithValue("@val14", tdau.readMemorey(896 + 12 * ch + 4 * 2));        //Ib[n]_leak=896+12*ch+4*I
-                    command.Parameters.AddWithValue("@val15", tdau.readMemorey(896 + 12 * ch + 4 * 3));        //Ib[n]_leak=896+12*ch+4*I
-                    command.Parameters.AddWithValue("@val", testId);
-                    command.Parameters.AddWithValue("@Proj_Id", Proj_Id);
-                    // Execute the SQLite query to insert the combination into the table
-                    command.ExecuteNonQuery();
-                }
+            // Create a SQLite command
+            using (SQLiteCommand command = new SQLiteCommand(insertQuery, connection))
+            {
+                // Set parameter values for the SQLite query
+                command.Parameters.Clear();
+                command.Parameters.AddWithValue("@val1", tdau.readMemorey(1090 + 26 * ch + 8 * 1));        //Vbe[n] = 1090+26*ch+8*I
+                command.Parameters.AddWithValue("@val5", tdau.readMemorey(1090 + 26 * ch + 8 * 3));        //Vbe[n]= 1090+26*ch+8*I
+                command.Parameters.AddWithValue("@val3", tdau.readMemorey(1090 + 26 * ch + 8 * 2));        //Vbe[n] = 1090+26*ch+8*I
+                command.Parameters.AddWithValue("@val2", tdau.readMemorey(1094 + 26 * ch + 8 * 1));        //Ib[n] = 1094+26*G30+8*H30
+                command.Parameters.AddWithValue("@val4", tdau.readMemorey(1094 + 26 * ch + 8 * 2));        //Ib[n] = 1094+26*ch+8*H30
+                command.Parameters.AddWithValue("@val6", tdau.readMemorey(1094 + 26 * ch + 8 * 3));        //Ib[n] = 1094+26*G30+8*H30
+                command.Parameters.AddWithValue("@val7", tdau.readMemorey(1036 + 12 * ch + 4 * 1));        //Ie[n]_meas=1036+12*ch+4*I
+                command.Parameters.AddWithValue("@val8", tdau.readMemorey(1036 + 12 * ch + 4 * 2));        //Ie[n]_meas=1036+12*ch+4*I
+                command.Parameters.AddWithValue("@val9", tdau.readMemorey(1036 + 12 * ch + 4 * 3));        //Ie[n]_meas=1036+12*ch+4*I
+                command.Parameters.AddWithValue("@val10", tdau.readMemorey(944 + 12 * ch + 4 * 1));        //Ie[n]_leak=944+12*ch+4*I
+                command.Parameters.AddWithValue("@val11", tdau.readMemorey(944 + 12 * ch + 4 * 2));        //Ie[n]_leak=944+12*ch+4*I
+                command.Parameters.AddWithValue("@val12", tdau.readMemorey(944 + 12 * ch + 4 * 3));        //Ie[n]_leak=944+12*ch+4*I
+                command.Parameters.AddWithValue("@val13", tdau.readMemorey(896 + 12 * ch + 4 * 1));        //Ib[n]_leak=896+12*ch+4*I
+                command.Parameters.AddWithValue("@val14", tdau.readMemorey(896 + 12 * ch + 4 * 2));        //Ib[n]_leak=896+12*ch+4*I
+                command.Parameters.AddWithValue("@val15", tdau.readMemorey(896 + 12 * ch + 4 * 3));        //Ib[n]_leak=896+12*ch+4*I
+                command.Parameters.AddWithValue("@DateTime", DateTime.Now);
+                command.Parameters.AddWithValue("@val", testId);
+                command.Parameters.AddWithValue("@Proj_Id", Proj_Id);
+                // Execute the SQLite query to insert the combination into the table
+                command.ExecuteNonQuery();
+            }
         }
 
+        private void tdauPort_MouseClick(object sender, MouseEventArgs e)
+        {
+            int[] usedPorts = new int[test.tdauList.Count()]; // Create array for used ports
+            TDAU1Controller tdau;
+            ((ComboBox)sender).Items.Clear();
+            COMPorts ports = new COMPorts();
+            int index = 0; // Index to fill usedPorts array
+            int[] portsArr = ports.GetComPorts();
+
+            foreach (TDAU1Controller tdauTmp in test.tdauList)
+            {
+                usedPorts[index] = tdauTmp.getCom(); // Get the COM port from the TDAU object
+                index++;
+            }
+            foreach (int port in portsArr)
+            {
+                // Check if the current port is not in the usedPorts array
+                if (Array.IndexOf(usedPorts, port) == -1) // -1 means the port is not in the usedPorts array
+                {
+                    ((ComboBox)sender).Items.Add(port);
+                }
+            }
+            ((ComboBox)sender).MaxDropDownItems = portsArr.Length;
+        }
+
+        private void connectTDAU_Click(object sender, EventArgs e)
+        {
+            TDAU1Controller tdau;
+
+            if (tdauPort.Text == "")
+            {
+                Console.WriteLine("Chose com port before you try to coonect!");
+                return;
+            }
+
+            int portValue = int.Parse(tdauPort.Text);
+            int tdauValue = test.tdauList.Count() + 1;
+
+            try
+            {
+                tdau = new TDAU1Controller(tdauValue);
+                tdau.setCom(portValue);
+                tdau.connect();
+                test.addTdau(tdau);
+                // Add the values to the ListView
+                ListViewItem item = new ListViewItem(new string[] { tdauValue.ToString(), portValue.ToString(), tdau.getSerialNumber().ToString() });
+                listView1.Items.Add(item); // Add the new row to the ListView
+
+                // Clear text and all items
+                tdauPort.Text = "";
+                tdauPort.Items.Clear();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+        }
 
         private void TDAU1ConnectBtn_Click(object sender, EventArgs e)
         {
             int[] usedPorts = new int[test.tdauList.Count()]; // Create array for used ports
-            TDAU tdau;
+            TDAU1Controller tdau;
 
             int index = 0; // Index to fill usedPorts array
-            foreach (TDAU tdauTmp in test.tdauList)
+            foreach (TDAU1Controller tdauTmp in test.tdauList)
             {
                 usedPorts[index] = tdauTmp.getCom(); // Get the COM port from the TDAU object
                 index++;
             }
 
-            using (var addForm = new AddTDAUForm(test.tdauList.Count() + 1,usedPorts))
+            using (var addForm = new AddTDAUForm(test.tdauList.Count() + 1, usedPorts))
             {
                 if (addForm.ShowDialog() == DialogResult.OK)
                 {
@@ -451,7 +547,7 @@ namespace ThermalBathGUI
 
                     try
                     {
-                        tdau = new TDAU();
+                        tdau = new TDAU1Controller();
                         tdau.setCom(portValue);
                         tdau.connect();
                         test.addTdau(tdau);
@@ -463,11 +559,11 @@ namespace ThermalBathGUI
                     {
                         Console.WriteLine(ex.Message);
                     }
-
-
                 }
             }
         }
+
+
 
 
 
@@ -566,6 +662,122 @@ namespace ThermalBathGUI
                     projStep.Text = "Step";
                 else projStep.Text = test.getProjStep();
             else projStep.Text = "Step";
+        }
+
+        private void bathPort_MouseClick(object sender, MouseEventArgs e)
+        {
+            ((ComboBox)sender).Items.Clear();
+            COMPorts ports = new COMPorts();
+            int index = 0; // Index to fill usedPorts array
+            int[] portsArr = ports.GetComPorts();
+
+            foreach (int port in portsArr)
+            {
+                ((ComboBox)sender).Items.Add(port);
+            }
+            ((ComboBox)sender).MaxDropDownItems = portsArr.Length;
+        }
+
+        private void connectBath_Click(object sender, EventArgs e)
+        {
+            if (bathPort.Text == "")
+            {
+                Console.WriteLine("you must chase com port for the bath first!");
+                return;
+            }
+            test.setBathCom(Convert.ToInt32(bathPort.Text));
+            try
+            {
+                bath = new Bath("COM" + test.getBathCom(), 2400);
+                bath.OpenConnection();
+                Console.WriteLine(bath.getTemp());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("bath not connected or you need to chose another com port!");
+            }
+        }
+
+        private void manTemperature_KeyPress(object sender, KeyPressEventArgs e)
+        {
+            if (e.KeyChar == (char)Keys.Enter)
+            {
+                e.Handled = true; // Prevent the system sound
+                string input = ((TextBox)sender).Text;
+                if (!string.IsNullOrEmpty(input))
+                {
+                    try
+                    {
+                        test.addTemperature(double.Parse(input));
+                    }
+                    catch (FormatException ex)
+                    {
+                        Console.WriteLine("The input is not a legal number: " + ex);
+                    }
+                }
+                ((TextBox)sender).Clear();
+                ((TextBox)sender).BackColor = Color.LemonChiffon;
+                temperatureList.Items.Clear();
+                temperatureList.BackColor = Color.PaleGreen;
+
+                foreach (var item in test.getTemperatureList())
+                {
+                    temperatureList.Items.Add($"{item:0.0}°C");
+                }
+            }
+        }
+
+
+        /*private void HandleInput(TextBox inputField, ListBox resultList, Action<double> listAdder, KeyPressEventArgs e, string ieType)
+        {
+            if (e.KeyChar == (char)Keys.Enter)
+            {
+                e.Handled = true; // Prevent the system sound
+                string input = inputField.Text;
+                if (!string.IsNullOrEmpty(input))
+                {
+                    try
+                    {
+                        listAdder(double.Parse(input) * 1e-6);
+                    }
+                    catch (FormatException ex)
+                    {
+                        Console.WriteLine("The input is not a legal number: " + ex);
+                    }
+                }
+                inputField.Clear();
+                inputField.BackColor = Color.LemonChiffon;
+                resultList.Items.Clear();
+                resultList.BackColor = Color.PaleGreen;
+
+                foreach (var item in test.getIeList(ieType))
+                {
+                    resultList.Items.Add($"{item:0.0e+0}");
+                }
+            }
+            else
+            {
+                inputField.BackColor = Color.MistyRose;
+            }
+        }*/
+
+        private void manTemperature_Enter(object sender, EventArgs e)
+        {
+            manTemperature.Text = "";
+        }
+
+        private void manTemperature_Leave(object sender, EventArgs e)
+        {
+            manTemperature.Text = "°C";
+        }
+
+        private void temperatureCleanBtn_Click(object sender, EventArgs e)
+        {
+            manTemperature.Clear();
+            manTemperature.BackColor = Color.LemonChiffon;
+            temperatureList.Items.Clear();
+            temperatureList.BackColor = Color.LemonChiffon;
+            test.clearTemperatureList();
         }
     }
 
